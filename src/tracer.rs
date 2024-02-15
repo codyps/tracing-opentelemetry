@@ -47,6 +47,11 @@ pub trait PreSampledTracer {
 
     /// Generate a new span id.
     fn new_span_id(&self) -> otel::SpanId;
+
+    /// Gets the current span limits.
+    fn span_limits(&self) -> Option<opentelemetry_sdk::trace::SpanLimits> {
+        None
+    }
 }
 
 impl PreSampledTracer for noop::NoopTracer {
@@ -103,6 +108,11 @@ impl PreSampledTracer for SdkTracer {
 
     fn new_span_id(&self) -> otel::SpanId {
         self.id_generator().new_span_id()
+    }
+
+    fn span_limits(&self) -> Option<opentelemetry_sdk::trace::SpanLimits> {
+        self.provider()
+            .map(|provider| provider.config().span_limits)
     }
 }
 
