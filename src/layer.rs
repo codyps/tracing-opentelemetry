@@ -29,6 +29,26 @@ const EVENT_EXCEPTION_NAME: &str = "exception";
 const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
 const FIELD_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
 
+// https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
+const OTEL_SPAN_EVENT_COUNT_LIMIT_ENV: &str = "OTEL_SPAN_EVENT_COUNT_LIMIT";
+const OTEL_SPAN_LINK_COUNT_LIMIT_ENV: &str = "OTEL_SPAN_LINK_COUNT_LIMIT";
+const OTEL_SPAN_EVENT_COUNT_LIMIT_DEFAULT: usize = 128;
+const OTEL_SPAN_LINK_COUNT_LIMIT_DEFAULT: usize = 128;
+
+static OTEL_SPAN_EVENT_COUNT_LIMIT: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var(OTEL_SPAN_EVENT_COUNT_LIMIT_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(OTEL_SPAN_EVENT_COUNT_LIMIT_DEFAULT)
+});
+
+static OTEL_SPAN_LINK_COUNT_LIMIT: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| {
+    std::env::var(OTEL_SPAN_LINK_COUNT_LIMIT_ENV)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(OTEL_SPAN_LINK_COUNT_LIMIT_DEFAULT)
+});
+
 /// An [OpenTelemetry] propagation layer for use in a project that uses
 /// [tracing].
 ///
@@ -39,6 +59,8 @@ pub struct OpenTelemetryLayer<S, T> {
     location: bool,
     tracked_inactivity: bool,
     with_threads: bool,
+    span_link_count_limit: usize,
+    span_event_count_limit: usize,
     sem_conv_config: SemConvConfig,
     get_context: WithContext,
     _registry: marker::PhantomData<S>,
@@ -543,6 +565,8 @@ where
             location: true,
             tracked_inactivity: true,
             with_threads: true,
+            span_link_count_limit: *OTEL_SPAN_LINK_COUNT_LIMIT,
+            span_event_count_limit: *OTEL_SPAN_EVENT_COUNT_LIMIT,
             sem_conv_config: SemConvConfig {
                 error_fields_to_exceptions: true,
                 error_records_to_exceptions: true,
@@ -595,6 +619,8 @@ where
             location: self.location,
             tracked_inactivity: self.tracked_inactivity,
             with_threads: self.with_threads,
+            span_link_count_limit: self.span_link_count_limit,
+            span_event_count_limit: self.span_event_count_limit,
             sem_conv_config: self.sem_conv_config,
             get_context: WithContext(OpenTelemetryLayer::<S, Tracer>::get_context),
             _registry: self._registry,
@@ -719,6 +745,28 @@ where
     pub fn with_threads(self, threads: bool) -> Self {
         Self {
             with_threads: threads,
+            ..self
+        }
+    }
+
+    /// Sets the maximum number of events we will record on a span.
+    ///
+    /// By default, this is set to the value of the env var `OTEL_SPAN_EVENT_COUNT_LIMIT` or 128 if
+    /// unset.
+    pub fn with_span_event_count_limit(self, span_event_count_limit: usize) -> Self {
+        Self {
+            span_event_count_limit,
+            ..self
+        }
+    }
+
+    /// Sets the maximum number of links we will record on a span.
+    ///
+    /// By default, this is set to the value of the env var `OTEL_SPAN_LINK_COUNT_LIMIT` or 128 if
+    /// unset.
+    pub fn with_span_link_count_limit(self, span_link_count_limit: usize) -> Self {
+        Self {
+            span_link_count_limit,
             ..self
         }
     }
@@ -964,6 +1012,13 @@ where
             } else {
                 data.builder.links = Some(vec![follows_link]);
             }
+
+            if let Some(ref mut links) = data.builder.links {
+                let limit = self.span_link_count_limit;
+                if links.len() > limit {
+                    links.drain(0..(links.len() - limit));
+                }
+            }
         }
     }
 
@@ -1069,6 +1124,13 @@ where
                     events.push(otel_event);
                 } else {
                     builder.events = Some(vec![otel_event]);
+                }
+
+                if let Some(ref mut events) = builder.events {
+                    let limit = self.span_event_count_limit;
+                    if events.len() > limit {
+                        events.drain(0..(events.len() - limit));
+                    }
                 }
             }
         };

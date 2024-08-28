@@ -47,6 +47,7 @@ fn test_tracer() -> (
     let subscriber = tracing_subscriber::registry()
         .with(
             layer()
+                .with_span_event_count_limit(usize::MAX)
                 .with_tracer(tracer.clone())
                 .with_filter(LevelFilter::TRACE),
         )
