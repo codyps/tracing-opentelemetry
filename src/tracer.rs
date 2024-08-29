@@ -111,9 +111,12 @@ impl PreSampledTracer for SdkTracer {
     }
 
     fn span_limits(&self) -> Option<opentelemetry_sdk::trace::SpanLimits> {
-        self.provider()
-            .map(|provider| provider.config().span_limits)
+        span_limits().into()
     }
+}
+
+fn span_limits() -> opentelemetry_sdk::trace::SpanLimits {
+    opentelemetry_sdk::trace::SpanLimits::default()
 }
 
 fn current_trace_state(
